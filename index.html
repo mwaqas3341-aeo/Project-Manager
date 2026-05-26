@@ -175,12 +175,14 @@
     <!-- ── Scripts ────────────────────────────────────────────────────────── -->
     <script>
       // ── API Config ──────────────────────────────────────────────────────
-      // Your deployed Google Apps Script Web App URL is stored in localStorage.
-      let API_URL = localStorage.getItem('gas_api_url') || '';
+      // Your deployed Google Apps Script Web App URL is hard-coded below.
+      // It will be used automatically, but can still be overridden via the setup banner if needed.
+      let API_URL = localStorage.getItem('gas_api_url') || 
+                    'https://script.google.com/macros/s/AKfycbzJCjTT3l-MKV_nicFLKeuginRFRUKFI6Qh8BogjUP2lXOswagwO2NWJQdg7D4XqB8o/exec';
       let localCache = { categories: [], projects: [] };
 
       document.addEventListener('DOMContentLoaded', function () {
-        // Restore saved URL into input
+        // Pre-fill the input with the hard-coded URL (or saved one) and hide the banner
         if (API_URL) {
           document.getElementById('apiUrlInput').value = API_URL;
           document.getElementById('configBanner').classList.add('hidden');
