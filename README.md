@@ -1,6 +1,6 @@
 # ⚡ Project Manager Pro — By Waqas
 
-A fast, GitHub-hosted project dashboard linked to your Google Sheets database.
+A fast, GitHub-hosted project dashboard, now backed by Supabase (Postgres) instead of Google Sheets.
 
 ---
 
@@ -8,77 +8,9 @@ A fast, GitHub-hosted project dashboard linked to your Google Sheets database.
 
 ```
 your-repo/
-├── index.html      ← Frontend (GitHub Pages)
-└── Code.gs         ← Backend (paste into Google Apps Script)
+├── index.html                              ← Frontend (GitHub Pages)
+└── .github/workflows/supabase-keepalive.yml ← Daily ping to stop the free-tier project pausing
 ```
-
----
-
-## 🚀 Setup Guide (One-Time, ~10 minutes)
-
-### Step 1 — Upload the Frontend to GitHub
-
-1. Go to [github.com](https://github.com) → **New repository**
-2. Name it anything (e.g. `project-manager-pro`)
-3. Set visibility to **Public** (required for free GitHub Pages)
-4. Upload `index.html` to the repo root
-5. Go to **Settings → Pages → Branch: main / root → Save**
-6. Your app URL will be: `https://YOUR-USERNAME.github.io/YOUR-REPO-NAME/`
-
----
-
-### Step 2 — Deploy the Google Apps Script Backend
-
-1. Open your existing Google Sheet
-2. Click **Extensions → Apps Script**
-3. **Delete all existing code** in `Code.gs`
-4. **Paste the entire contents of `Code.gs`** from this repo
-5. Click **Save** (💾)
-6. Click **Deploy → New deployment**
-7. Settings:
-   - **Type:** Web app
-   - **Execute as:** Me
-   - **Who has access:** Anyone
-8. Click **Deploy** → Authorize when prompted
-9. **Copy the Web App URL** — it looks like:
-   ```
-   https://script.google.com/macros/s/AKfycb.../exec
-   ```
-
----
-
-### Step 3 — Connect Frontend to Backend
-
-1. Open your GitHub Pages URL
-2. You'll see a yellow **Setup banner** at the top
-3. Paste your **GAS Web App URL** into the input field
-4. Click **Save**
-5. ✅ Your dashboard loads! The URL is saved in your browser automatically.
-
----
-
-## 🔄 Updating the Backend
-
-Whenever you change `Code.gs`:
-1. Go to Apps Script → **Deploy → Manage deployments**
-2. Click the **pencil (edit) icon** on your deployment
-3. Change version to **"New version"**
-4. Click **Deploy**
-
-> ⚠️ You must create a new version — editing without re-deploying won't update the live API.
-
----
-
-## 📋 Spreadsheet Format
-
-Your Google Sheet (first sheet tab) must have this column order:
-
-| A          | B            | C    |
-|------------|--------------|------|
-| Category   | Project Name | Link |
-| Automation | My Bot       | https://... |
-
-Row 1 is treated as a header and skipped automatically.
 
 ---
 
@@ -87,17 +19,31 @@ Row 1 is treated as a header and skipped automatically.
 ```
 GitHub Pages (index.html)
         │
-        │  fetch() HTTP calls
+        │  supabase-js client (anon key, RLS-scoped)
         ▼
-Google Apps Script Web App (Code.gs)
-        │
-        │  SpreadsheetApp
-        ▼
-Google Sheets (your data)
+Supabase Postgres — table: pm_projects
 ```
 
-- **GET** requests → `getDashboardData` (read all projects)
-- **POST** requests → add / update / delete projects & categories
+- No backend deploy step anymore — `index.html` talks to Supabase directly via `@supabase/supabase-js`.
+- Table: `pm_projects` (`id`, `category`, `name`, `link`, `created_at`). Categories are plain text on each project, exactly like the old spreadsheet's column A.
+- Access is open (no login) via the Supabase **anon key**, matching the old "unlisted URL" trust model — this app is for a single private user and the link isn't shared. Row Level Security is enabled with permissive policies scoped to the `pm_projects` and `pm_keepalive` tables only; it doesn't touch your other Supabase apps in the same project.
+
+---
+
+## 😴 Keeping the free-tier project awake
+
+Supabase pauses free-tier projects after 7 days without any API activity. `.github/workflows/supabase-keepalive.yml` runs daily (03:00 UTC) and sends a real read + write request against a tiny `pm_keepalive` table, which resets the inactivity timer. You can also trigger it manually from the repo's **Actions** tab (`workflow_dispatch`).
+
+No secrets setup needed — it uses the anon key directly (safe, since RLS already limits what that key can touch).
+
+---
+
+## 🚀 Deploying changes
+
+Same as before:
+1. Edit `index.html` locally.
+2. Push to `main`.
+3. GitHub Pages picks up the change automatically (Settings → Pages → Branch: main / root).
 
 ---
 
@@ -105,8 +51,6 @@ Google Sheets (your data)
 
 | Problem | Fix |
 |---|---|
-| "Failed to fetch" error | Check your GAS URL is correct and deployed as "Anyone" |
-| Changes not reflecting | Re-deploy GAS with a **New version** |
-| CORS error in browser | Make sure GAS is deployed with **Execute as: Me** and **Anyone** access |
-| Blank dashboard | Check your Sheet has data in columns A, B, C starting from row 2 |
-| URL forgotten | Open browser DevTools → Application → LocalStorage → `gas_api_url` |
+| Blank dashboard / "Supabase Sync Error" | Check the Supabase project isn't paused (Dashboard → your project) and that `SUPABASE_URL`/`SUPABASE_ANON_KEY` in `index.html` are correct |
+| Project reappears as paused despite the workflow | Check the Actions tab — a workflow that stops running (e.g. repo went 60+ days without a commit) gets auto-disabled by GitHub; push any commit or re-enable it manually |
+| Changes not reflecting | Hard-refresh (Supabase writes are instant, but browser may cache `index.html` — GitHub Pages CDN can take a minute to update) |
