@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Project Manager Pro By Waqas</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
       ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: #0f172a; }
@@ -43,19 +44,6 @@
     <!-- ── Main ───────────────────────────────────────────────────────────── -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-      <!-- Config Banner (shown until API URL is set) -->
-      <div id="configBanner" class="mb-6 bg-amber-950/30 border border-amber-700/50 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-        <div class="flex-1">
-          <p class="text-amber-400 font-bold text-sm mb-1">⚙️ Setup Required — Paste your GAS Web App URL</p>
-          <p class="text-slate-400 text-xs">Deploy Code.gs as a Web App in Google Apps Script, then paste the URL below and click Save.</p>
-        </div>
-        <div class="flex gap-2 w-full sm:w-auto">
-          <input id="apiUrlInput" type="url" placeholder="https://script.google.com/macros/s/..." 
-            class="flex-1 sm:w-80 bg-[#0b0f19] border border-slate-700 focus:border-amber-500 focus:outline-none rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600">
-          <button id="saveApiUrlBtn" class="bg-amber-500 hover:bg-amber-600 text-black font-bold px-4 py-2 rounded-xl text-xs transition shrink-0">Save</button>
-        </div>
-      </div>
-
       <!-- Filter Bar -->
       <section class="bg-[#121824] border border-slate-800/80 rounded-2xl p-6 mb-8 shadow-2xl">
         <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
@@ -89,7 +77,7 @@
       <!-- Loading -->
       <div id="loading" class="hidden flex flex-col items-center justify-center py-24">
         <div class="animate-spin rounded-full h-12 w-12 border-4 border-slate-800 border-t-emerald-500 border-b-orange-500 mb-4"></div>
-        <p class="text-slate-400 text-sm tracking-wider font-mono">Connecting to spreadsheet database...</p>
+        <p class="text-slate-400 text-sm tracking-wider font-mono">Connecting to Supabase...</p>
       </div>
 
       <!-- Dashboard -->
@@ -165,7 +153,7 @@
         </div>
         <div class="p-6 space-y-4">
           <p class="text-xs text-slate-400 leading-relaxed bg-[#0b0f19] border border-slate-800 p-3 rounded-xl">
-            💡 <strong class="text-orange-500">Important:</strong> Deleting or renaming a category updates all mapped rows instantly in your spreadsheet.
+            💡 <strong class="text-orange-500">Important:</strong> Deleting or renaming a category updates all mapped rows instantly in your Supabase database.
           </p>
           <div class="max-h-72 overflow-y-auto border border-slate-800 rounded-xl divide-y divide-slate-800/80 bg-[#0b0f19]" id="catMgrList"></div>
         </div>
@@ -174,70 +162,47 @@
 
     <!-- ── Scripts ────────────────────────────────────────────────────────── -->
     <script>
-      // ── API Config ──────────────────────────────────────────────────────
-      // Your deployed Google Apps Script Web App URL is hard-coded below.
-      // It will be used automatically, but can still be overridden via the setup banner if needed.
-      let API_URL = localStorage.getItem('gas_api_url') || 
-                    'https://script.google.com/macros/s/AKfycbzJCjTT3l-MKV_nicFLKeuginRFRUKFI6Qh8BogjUP2lXOswagwO2NWJQdg7D4XqB8o/exec';
+      // ── Supabase Config ─────────────────────────────────────────────────
+      const SUPABASE_URL = 'https://cnvckclwrixpobigdrmu.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNudmNrY2x3cml4cG9iaWdkcm11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4Mzg4NTUsImV4cCI6MjEwMTQxNDg1NX0.9COZcwPbhHfybivjlkYRbwolo4_dAFnHvw8AChBXIrY';
+      const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
       let localCache = { categories: [], projects: [] };
 
       document.addEventListener('DOMContentLoaded', function () {
-        // Pre-fill the input with the hard-coded URL (or saved one) and hide the banner
-        if (API_URL) {
-          document.getElementById('apiUrlInput').value = API_URL;
-          document.getElementById('configBanner').classList.add('hidden');
-          loadDashboard();
-        }
+        loadDashboard();
         setupEventListeners();
       });
 
-      // ── Save API URL ────────────────────────────────────────────────────
-      document.getElementById('saveApiUrlBtn').addEventListener('click', function () {
-        const val = document.getElementById('apiUrlInput').value.trim();
-        if (!val || !val.startsWith('https://script.google.com')) {
-          alert('Please paste a valid Google Apps Script Web App URL (starts with https://script.google.com)');
-          return;
-        }
-        API_URL = val;
-        localStorage.setItem('gas_api_url', API_URL);
-        document.getElementById('configBanner').classList.add('hidden');
-        loadDashboard();
-      });
+      // ── Data Helpers ────────────────────────────────────────────────────
+      // rowIndex in the UI now refers to the row's uuid `id` from Supabase
+      // (kept as `rowIndex` throughout so the rest of the UI code is unchanged)
 
-      // ── API Helpers ─────────────────────────────────────────────────────
-      async function apiGet(action) {
-        const res = await fetch(`${API_URL}?action=${action}`);
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || 'Unknown error');
-        return json.data;
-      }
-
-      async function apiPost(payload) {
-        const res = await fetch(API_URL, {
-          method: 'POST',
-          body: JSON.stringify(payload)
-          // Note: GAS doesn't require Content-Type header for doPost to work
-        });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || 'Unknown error');
-        return json;
+      async function fetchProjects() {
+        const { data, error } = await sb
+          .from('pm_projects')
+          .select('id, category, name, link')
+          .order('category', { ascending: true })
+          .order('name', { ascending: true });
+        if (error) throw new Error(error.message);
+        return data.map(p => ({ rowIndex: p.id, category: p.category, name: p.name, link: p.link }));
       }
 
       // ── Dashboard ───────────────────────────────────────────────────────
       function loadDashboard() {
-        if (!API_URL) return;
         showLoading(true);
-        apiGet('getDashboardData')
-          .then(data => {
-            localCache = data;
-            populateFilters(data.categories);
-            populateCategoryDropdown(data.categories);
+        fetchProjects()
+          .then(projects => {
+            const categories = [...new Set(projects.map(p => p.category))].sort((a, b) => a.localeCompare(b));
+            localCache = { categories, projects };
+            populateFilters(categories);
+            populateCategoryDropdown(categories);
             applyFilters();
-            renderCategoryManagerList(data.categories);
+            renderCategoryManagerList(categories);
             showLoading(false);
           })
           .catch(err => {
-            alert('Spreadsheet Sync Error: ' + err.message);
+            alert('Supabase Sync Error: ' + err.message);
             showLoading(false);
           });
       }
@@ -294,7 +259,7 @@
             items += `
               <li class="flex items-center justify-between group/item p-2 hover:bg-[#182132]/50 rounded-xl transition-all duration-150">
                 <div class="flex items-center space-x-2.5 truncate max-w-[70%]">
-                  <button onclick="openEditProjectModal(${p.rowIndex})" class="text-xs opacity-40 hover:opacity-100 transition hover:scale-110" title="Edit">✏️</button>
+                  <button onclick="openEditProjectModal('${p.rowIndex}')" class="text-xs opacity-40 hover:opacity-100 transition hover:scale-110" title="Edit">✏️</button>
                   <span class="text-slate-200 text-sm font-semibold truncate group-hover/item:text-white">${escapeHtml(p.name)}</span>
                 </div>
                 <a href="${escapeHtml(p.link)}" target="_blank" rel="noopener"
@@ -365,17 +330,23 @@
         if (!newName || newName.trim() === '' || newName.trim() === oldName) return;
         showLoading(true);
         document.getElementById('categoryManagerModal').classList.add('hidden');
-        apiPost({ action: 'renameCategory', oldName, newName: newName.trim() })
-          .then(() => loadDashboard())
+        sb.from('pm_projects').update({ category: newName.trim() }).eq('category', oldName)
+          .then(({ error }) => {
+            if (error) throw new Error(error.message);
+            loadDashboard();
+          })
           .catch(err => { alert(err.message); showLoading(false); });
       }
 
       function promptDeleteCategory(catName) {
-        if (!confirm(`Delete category "${catName}" and ALL its projects from the spreadsheet?`)) return;
+        if (!confirm(`Delete category "${catName}" and ALL its projects permanently?`)) return;
         showLoading(true);
         document.getElementById('categoryManagerModal').classList.add('hidden');
-        apiPost({ action: 'deleteCategory', categoryName: catName })
-          .then(() => loadDashboard())
+        sb.from('pm_projects').delete().eq('category', catName)
+          .then(({ error }) => {
+            if (error) throw new Error(error.message);
+            loadDashboard();
+          })
           .catch(err => { alert(err.message); showLoading(false); });
       }
 
@@ -434,8 +405,11 @@
           if (!idx || !confirm('Delete this project permanently?')) return;
           showLoading(true);
           modal.classList.add('hidden');
-          apiPost({ action: 'deleteProject', rowIndex: Number(idx) })
-            .then(() => loadDashboard())
+          sb.from('pm_projects').delete().eq('id', idx)
+            .then(({ error }) => {
+              if (error) throw new Error(error.message);
+              loadDashboard();
+            })
             .catch(err => { alert(err.message); showLoading(false); });
         });
 
@@ -450,15 +424,16 @@
 
           submitBtn.disabled = true;
           formMsg.className  = 'text-xs font-semibold p-3 bg-slate-900 border border-orange-500/30 text-orange-400 rounded-xl block';
-          formMsg.textContent = 'Writing to spreadsheet...';
+          formMsg.textContent = 'Writing to Supabase...';
           formMsg.classList.remove('hidden');
 
-          const payload = rowIndexStr
-            ? { action: 'updateProject', rowIndex: Number(rowIndexStr), category, name, link }
-            : { action: 'addProject', category, name, link };
+          const dbCall = rowIndexStr
+            ? sb.from('pm_projects').update({ category, name, link }).eq('id', rowIndexStr)
+            : sb.from('pm_projects').insert({ category, name, link });
 
-          apiPost(payload)
-            .then(() => {
+          dbCall
+            .then(({ error }) => {
+              if (error) throw new Error(error.message);
               formMsg.className  = 'text-xs font-semibold p-3 bg-emerald-950/20 border border-emerald-500/30 text-emerald-400 rounded-xl block';
               formMsg.textContent = 'Saved! Syncing dashboard...';
               setTimeout(() => { modal.classList.add('hidden'); loadDashboard(); submitBtn.disabled = false; }, 800);
